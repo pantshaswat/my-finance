@@ -1,17 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { Category } from '@/types';
+import { Card, Modal, EmptyState } from '@/components/ui';
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [formData, setFormData] = useState({ name: '', type: 'expense', color: '#6366f1' });
 
-  useEffect(() => {
-    fetchCategories();
-  }, []);
+  useEffect(() => { fetchCategories(); }, []);
 
   const fetchCategories = async () => {
     const res = await fetch('/api/categories');
@@ -30,102 +28,92 @@ export default function CategoriesPage() {
     fetchCategories();
   };
 
-  const expenseCategories = categories.filter(c => c.type === 'expense');
-  const incomeCategories = categories.filter(c => c.type === 'income');
+  const expense = categories.filter((c) => c.type === 'expense');
+  const income = categories.filter((c) => c.type === 'income');
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <Link href="/dashboard" className="text-blue-600 hover:underline">← Back to Dashboard</Link>
+    <div className="p-8 max-w-7xl mx-auto">
+      <header className="flex justify-between items-start mb-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Categories</h1>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">
+            {categories.length} total · {income.length} income · {expense.length} expense
+          </p>
         </div>
-      </nav>
+        <button onClick={() => setShowAdd(true)} className="btn btn-primary">+ Category</button>
+      </header>
 
-      <div className="max-w-7xl mx-auto p-8">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold">Categories</h1>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
-            Add Category
-          </button>
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-bold mb-4 text-red-600">Expense Categories</h2>
-            <div className="space-y-2">
-              {expenseCategories.map(c => (
-                <div key={c._id} className="flex items-center gap-3 p-3 border rounded">
-                  <div className="w-4 h-4 rounded" style={{ backgroundColor: c.color }}></div>
-                  <span className="flex-1">{c.name}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-bold mb-4 text-green-600">Income Categories</h2>
-            <div className="space-y-2">
-              {incomeCategories.map(c => (
-                <div key={c._id} className="flex items-center gap-3 p-3 border rounded">
-                  <div className="w-4 h-4 rounded" style={{ backgroundColor: c.color }}></div>
-                  <span className="flex-1">{c.name}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        <CategoryList title="Expenses" categories={expense} tone="expense" />
+        <CategoryList title="Income" categories={income} tone="income" />
       </div>
 
-      {showAdd && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-lg w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Add Category</h2>
-            <form onSubmit={handleAdd} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Name</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full p-2 border rounded"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Type</label>
-                <select
-                  value={formData.type}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                  className="w-full p-2 border rounded"
-                >
-                  <option value="expense">Expense</option>
-                  <option value="income">Income</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Color</label>
-                <input
-                  type="color"
-                  value={formData.color}
-                  onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                  className="w-full p-2 border rounded h-12"
-                />
-              </div>
-              <div className="flex gap-3">
-                <button type="submit" className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
-                  Create
-                </button>
-                <button type="button" onClick={() => setShowAdd(false)} className="flex-1 bg-gray-300 py-2 rounded hover:bg-gray-400">
-                  Cancel
-                </button>
-              </div>
-            </form>
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add category">
+        <form onSubmit={handleAdd} className="space-y-4">
+          <div>
+            <label className="label">Name</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="input"
+              required
+            />
           </div>
+          <div>
+            <label className="label">Type</label>
+            <select
+              value={formData.type}
+              onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+              className="input"
+            >
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Color</label>
+            <input
+              type="color"
+              value={formData.color}
+              onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+              className="input h-10 p-1"
+            />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="submit" className="btn btn-primary flex-1 justify-center">Create</button>
+            <button type="button" onClick={() => setShowAdd(false)} className="btn btn-secondary flex-1 justify-center">Cancel</button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+}
+
+function CategoryList({
+  title,
+  categories,
+  tone,
+}: { title: string; categories: Category[]; tone: 'income' | 'expense' }) {
+  const toneClass = tone === 'income' ? 'text-[var(--color-income)]' : 'text-[var(--color-expense)]';
+  return (
+    <Card className="p-5">
+      <h2 className={`text-sm font-semibold mb-3 ${toneClass}`}>{title}</h2>
+      {categories.length === 0 ? (
+        <EmptyState title="None yet" />
+      ) : (
+        <div className="space-y-1">
+          {categories.map((c) => (
+            <div
+              key={c._id}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--color-bg)]"
+            >
+              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: c.color }} />
+              <span className="text-sm">{c.name}</span>
+            </div>
+          ))}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

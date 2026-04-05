@@ -4,18 +4,23 @@ import { signIn } from 'next-auth/react';
 
 export default function SignIn() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded-lg shadow-md w-96">
-        <h1 className="text-2xl font-bold mb-6 text-center">Finance Manager</h1>
-        <p className="text-gray-600 mb-6 text-center">
-          Sign in to manage your finances and sync with your bank emails
-        </p>
+    <div className="min-h-screen flex items-center justify-center p-4 bg-[var(--color-bg)]">
+      <div className="card p-8 w-full max-w-sm">
+        <div className="text-center mb-6">
+          <p className="text-2xl font-semibold tracking-tight">finance</p>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">
+            Automatic transaction tracking from your bank emails.
+          </p>
+        </div>
         <button
           onClick={() => signIn('google', { callbackUrl: '/dashboard' })}
-          className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 font-medium"
+          className="btn btn-primary w-full justify-center py-3"
         >
-          Sign in with Google
+          Continue with Google
         </button>
+        <p className="text-xs text-[var(--color-text-faint)] text-center mt-4">
+          Grants read-only access to your Gmail to scan bank emails.
+        </p>
       </div>
     </div>
   );

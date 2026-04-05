@@ -8,7 +8,37 @@ export interface Transaction {
   date: string;
   source: 'manual' | 'email';
   emailId?: string;
+  merchant?: string;
+  reference?: string;
+  currency?: string;
+  balanceAfter?: number;
   createdAt: string;
+}
+
+export interface SyncJob {
+  _id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  startedAt: string;
+  finishedAt?: string;
+  totals: {
+    fetched: number;
+    parsed: number;
+    ignored: number;
+    skipped: number;
+    failed: number;
+  };
+  perBank: Array<{
+    bankEmail: string;
+    fetched: number;
+    parsed: number;
+    ignored: number;
+    skipped: number;
+    failed: number;
+    error?: string;
+  }>;
+  currentBank?: string;
+  currentMessage?: string;
+  error?: string;
 }
 
 export interface Category {

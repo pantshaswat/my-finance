@@ -9,6 +9,10 @@ export interface ITransaction extends Document {
   date: Date;
   source: 'manual' | 'email';
   emailId?: string;
+  merchant?: string;
+  reference?: string;
+  currency?: string;
+  balanceAfter?: number;
   createdAt: Date;
 }
 
@@ -21,9 +25,14 @@ const TransactionSchema = new Schema<ITransaction>({
   date: { type: Date, required: true },
   source: { type: String, enum: ['manual', 'email'], default: 'manual' },
   emailId: { type: String },
+  merchant: { type: String },
+  reference: { type: String },
+  currency: { type: String },
+  balanceAfter: { type: Number },
 }, { timestamps: true });
 
 TransactionSchema.index({ userId: 1, date: -1 });
-TransactionSchema.index({ emailId: 1 }, { sparse: true, unique: true });
+// Scoped per user to avoid cross-user collisions.
+TransactionSchema.index({ userId: 1, emailId: 1 }, { sparse: true, unique: true });
 
 export default mongoose.models.Transaction || mongoose.model<ITransaction>('Transaction', TransactionSchema);
