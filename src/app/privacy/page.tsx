@@ -3,7 +3,7 @@ export const metadata = {
 };
 
 const EFFECTIVE_DATE = 'April 6, 2026';
-const CONTACT_EMAIL = 'pantshaswat@gmail.com'; // TODO: replace with your public contact email
+const CONTACT_EMAIL = 'pantshaswat@gmail.com'; 
 
 export default function PrivacyPolicyPage() {
   return (
