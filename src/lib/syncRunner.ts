@@ -7,9 +7,10 @@ import BankPrompt from '@/models/BankPrompt';
 import ProcessedEmail from '@/models/ProcessedEmail';
 import SyncJob from '@/models/SyncJob';
 import { fetchEmailsFromSender, EmailMessage } from '@/lib/gmail';
-import { parseEmailWithGemini, GeminiQuotaError } from '@/lib/gemini';
+import { parseBatchEmailsWithGemini, GeminiQuotaError, type TransactionData, type BatchEmailInput } from '@/lib/gemini';
 
 const MAX_EMAILS_PER_BANK = 50;
+const BATCH_SIZE = 10;
 
 /**
  * Access tokens are held in memory only for the lifetime of the sync job.
@@ -159,22 +160,20 @@ async function processBank(
 
   let newestProcessed = startDate;
 
+  // ── Phase 1: claim emails and collect claimable ones ──────────────
+  interface ClaimedEmail {
+    email: EmailMessage;
+    originalIndex: number;
+  }
+  const claimed: ClaimedEmail[] = [];
+
   for (let i = 0; i < emails.length; i++) {
     const email = emails[i];
-    await updateJob(jobId, {
-      currentMessage: `[${bankEmail}] parsing ${i + 1}/${emails.length}…`,
-    });
-
     const claim = await claimEmail(userId, bankEmail, email);
-    if (claim === 'already-done') {
+    if (claim === 'already-done' || claim === 'already-failed') {
       tally.skipped++;
       continue;
     }
-    if (claim === 'already-failed') {
-      tally.skipped++;
-      continue;
-    }
-
     if (!email.body || email.body.trim().length === 0) {
       await ProcessedEmail.updateOne(
         { userId, emailId: email.id },
@@ -183,100 +182,123 @@ async function processBank(
       tally.failed++;
       continue;
     }
+    claimed.push({ email, originalIndex: i });
+  }
 
-    let parsed;
+  // ── Phase 2: send claimed emails to Gemini in batches ─────────────
+  for (let batchStart = 0; batchStart < claimed.length; batchStart += BATCH_SIZE) {
+    const batch = claimed.slice(batchStart, batchStart + BATCH_SIZE);
+
+    await updateJob(jobId, {
+      currentMessage: `[${bankEmail}] parsing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(claimed.length / BATCH_SIZE)} (${batch.length} emails)…`,
+    });
+
+    const batchInputs: BatchEmailInput[] = batch.map((c, idx) => ({
+      index: idx,
+      body: c.email.body!,
+    }));
+
+    let results: Map<number, TransactionData | null>;
     try {
-      parsed = await parseEmailWithGemini(
-        email.body,
+      results = await parseBatchEmailsWithGemini(
+        batchInputs,
         bankPrompt.promptTemplate,
         categoryNames
       );
     } catch (err: any) {
-      // Quota exhaustion is not this email's fault — release the claim so
-      // it can be retried naturally on the next sync, then abort the job.
       if (err instanceof GeminiQuotaError) {
-        await ProcessedEmail.deleteOne({ userId, emailId: email.id });
+        // Release all claims in this batch so they retry on next sync.
+        for (const c of batch) {
+          await ProcessedEmail.deleteOne({ userId, emailId: c.email.id });
+        }
         throw err;
       }
-      await ProcessedEmail.updateOne(
-        { userId, emailId: email.id },
-        { $set: { status: 'failed', reason: err?.message || 'gemini error' } }
-      );
-      tally.failed++;
-      continue;
-    }
-
-    if (!parsed) {
-      await ProcessedEmail.updateOne(
-        { userId, emailId: email.id },
-        { $set: { status: 'failed', reason: 'parse returned null' } }
-      );
-      tally.failed++;
-      continue;
-    }
-
-    if (parsed.isTransaction === false) {
-      await ProcessedEmail.updateOne(
-        { userId, emailId: email.id },
-        { $set: { status: 'ignored', reason: parsed.ignoreReason || 'not a transaction' } }
-      );
-      tally.ignored++;
-      continue;
-    }
-
-    if (!parsed.type || !parsed.amount || !parsed.date) {
-      await ProcessedEmail.updateOne(
-        { userId, emailId: email.id },
-        { $set: { status: 'failed', reason: 'missing required fields' } }
-      );
-      tally.failed++;
-      continue;
-    }
-
-    try {
-      const category = await resolveCategory(userId, parsed.suggestedCategory, parsed.type);
-      const txn = await Transaction.create({
-        userId,
-        categoryId: category._id,
-        type: parsed.type,
-        amount: parsed.amount,
-        description: parsed.description || '(no description)',
-        date: new Date(parsed.date),
-        source: 'email',
-        emailId: email.id,
-        merchant: parsed.merchant,
-        reference: parsed.reference,
-        currency: parsed.currency,
-        balanceAfter: parsed.balanceAfter,
-      });
-
-      await ProcessedEmail.updateOne(
-        { userId, emailId: email.id },
-        { $set: { status: 'parsed', transactionId: txn._id } }
-      );
-
-      if (!categoryNames.includes(category.name)) categoryNames.push(category.name);
-      tally.parsed++;
-    } catch (err: any) {
-      // Transaction insert could fail on duplicate emailId (legacy data). Mark
-      // as parsed anyway since someone else already created the txn.
-      if (err?.code === 11000) {
+      // Non-quota error: mark entire batch as failed.
+      for (const c of batch) {
         await ProcessedEmail.updateOne(
-          { userId, emailId: email.id },
-          { $set: { status: 'parsed', reason: 'txn already existed' } }
-        );
-        tally.skipped++;
-      } else {
-        await ProcessedEmail.updateOne(
-          { userId, emailId: email.id },
-          { $set: { status: 'failed', reason: err?.message || 'db insert failed' } }
+          { userId, emailId: c.email.id },
+          { $set: { status: 'failed', reason: err?.message || 'gemini error' } }
         );
         tally.failed++;
       }
+      continue;
     }
 
-    const emailDate = email.internalDate ? new Date(email.internalDate) : null;
-    if (emailDate && emailDate > newestProcessed) newestProcessed = emailDate;
+    // ── Phase 3: process each result in the batch ───────────────────
+    for (let idx = 0; idx < batch.length; idx++) {
+      const { email } = batch[idx];
+      const parsed = results.get(idx) ?? null;
+
+      if (!parsed) {
+        await ProcessedEmail.updateOne(
+          { userId, emailId: email.id },
+          { $set: { status: 'failed', reason: 'parse returned null' } }
+        );
+        tally.failed++;
+        continue;
+      }
+
+      if (parsed.isTransaction === false) {
+        await ProcessedEmail.updateOne(
+          { userId, emailId: email.id },
+          { $set: { status: 'ignored', reason: parsed.ignoreReason || 'not a transaction' } }
+        );
+        tally.ignored++;
+        continue;
+      }
+
+      if (!parsed.type || !parsed.amount || !parsed.date) {
+        await ProcessedEmail.updateOne(
+          { userId, emailId: email.id },
+          { $set: { status: 'failed', reason: 'missing required fields' } }
+        );
+        tally.failed++;
+        continue;
+      }
+
+      try {
+        const category = await resolveCategory(userId, parsed.suggestedCategory, parsed.type);
+        const txn = await Transaction.create({
+          userId,
+          categoryId: category._id,
+          type: parsed.type,
+          amount: parsed.amount,
+          description: parsed.description || '(no description)',
+          date: new Date(parsed.date),
+          source: 'email',
+          emailId: email.id,
+          merchant: parsed.merchant,
+          reference: parsed.reference,
+          currency: parsed.currency,
+          balanceAfter: parsed.balanceAfter,
+        });
+
+        await ProcessedEmail.updateOne(
+          { userId, emailId: email.id },
+          { $set: { status: 'parsed', transactionId: txn._id } }
+        );
+
+        if (!categoryNames.includes(category.name)) categoryNames.push(category.name);
+        tally.parsed++;
+      } catch (err: any) {
+        if (err?.code === 11000) {
+          await ProcessedEmail.updateOne(
+            { userId, emailId: email.id },
+            { $set: { status: 'parsed', reason: 'txn already existed' } }
+          );
+          tally.skipped++;
+        } else {
+          await ProcessedEmail.updateOne(
+            { userId, emailId: email.id },
+            { $set: { status: 'failed', reason: err?.message || 'db insert failed' } }
+          );
+          tally.failed++;
+        }
+      }
+
+      const emailDate = email.internalDate ? new Date(email.internalDate) : null;
+      if (emailDate && emailDate > newestProcessed) newestProcessed = emailDate;
+    }
   }
 
   // Advance cursor for this bank.
